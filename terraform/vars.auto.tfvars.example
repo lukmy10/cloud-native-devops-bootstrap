@@ -1,0 +1,2 @@
+digitalocean_token = "PUT TOKEN HERE FROM DIGITALOCEAN, SOMETHING LIKE THIS --> dop_v1_a91f........................"
+public_key =  "PUT SSH PATH KEY HERE, SOMETHING LIKE THIS --> ~/.ssh/id_edxxxxx.pub, YOU CAN CREATE WITH ssh-keygen"

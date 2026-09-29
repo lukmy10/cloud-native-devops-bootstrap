@@ -1,0 +1,246 @@
+---
+- name: Play 1 - Manage Infrastructure via Terraform
+  hosts: localhost
+  connection: local
+
+  tasks:
+
+    - name: Run Terraform Apply
+      community.general.terraform:
+        project_path: "../terraform"
+        state: present
+        force_init: true
+      register: tf_result
+
+    - name: Print Terraform Outputs
+      ansible.builtin.debug:
+        msg: "The provisioned server IP is {{ tf_result.outputs.ipv4_public_s.value }}"
+
+    - name: Print Terraform Outputs
+      ansible.builtin.debug:
+        msg: "The provisioned node IP is {{ tf_result.outputs.ipv4_public_n.value }}"
+
+    - name: Add new kserver01r01 instances to a temporary Ansible group
+      ansible.builtin.add_host:
+        name: "kserver01r01"
+        groups: "new_droplets"
+        ansible_host: "{{ tf_result.outputs.ipv4_public_s.value | flatten | first  }}"
+        ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
+
+    - name: Add new knode01r01 instances to a temporary Ansible group
+      ansible.builtin.add_host:
+        name: "knode01r01"
+        groups: "new_droplets"
+        ansible_host: "{{ tf_result.outputs.ipv4_public_n.value | flatten | first  }}"
+        ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
+
+
+- name: Play 2 - Configure OS Hostnames on the New Droplets
+  hosts: new_droplets
+  become: true
+  gather_facts: false
+  vars:
+    ansible_user: root
+  tasks:
+    
+    - name: Wait for SSH to become available
+      ansible.builtin.wait_for_connection:
+        delay: 1
+        timeout: 50
+
+    - name: Add local user to be used by kubectl
+      shell: useradd -m kubeuser
+
+    - name: Gather facts
+      ansible.builtin.gather_facts:
+
+
+- name: Play 3 - Copy and execute installation scripts for control plane node
+  hosts: kserver01r01
+  become: true
+  gather_facts: false
+  vars:
+    ansible_user: root
+  tasks:
+    
+    - name: Copy kubernetes installation scripts
+      ansible.builtin.copy:
+        src: ../scripts/install_kubernetes.sh
+        dest: /home/kubeuser/install_kubernetes.sh
+        mode: '0755'
+
+    - name: Execute kubernetes build scripts
+      shell: /home/kubeuser/install_kubernetes.sh
+      register: result01
+
+    - debug: var=result01.stdout_lines
+
+
+- name: Play 4 - Copy and execute installation scripts for worker node
+  hosts: knode01r01
+  become: true
+  gather_facts: false
+  vars:
+    ansible_user: root
+  tasks:
+    
+    - name: Copy kubernetes installation scripts
+      ansible.builtin.copy:
+        src: ../scripts/install_kubernetes_worker.sh
+        dest: /home/kubeuser/install_kubernetes_worker.sh
+        mode: '0755'
+
+    - name: Execute kubernetes build scripts
+      shell: /home/kubeuser/install_kubernetes_worker.sh
+      register: result02
+
+    - debug: var=result02.stdout_lines
+
+
+- name: Play 5 - Get join command on controle plane node
+  hosts: kserver01r01
+  become: true
+  gather_facts: false
+  vars:
+    ansible_user: root
+  tasks:
+    
+    - name: Execute token create command
+      shell: kubeadm token create --print-join-command
+      register: result03
+
+    - debug: var=result03.stdout_lines
+
+
+- name: Play 6 - Join the worker to the cluster
+  hosts: knode01r01
+  become: true
+  gather_facts: false
+  vars:
+    ansible_user: root
+  tasks:
+
+    - name: Execute join command on worker node
+      shell: "{{ hostvars['kserver01r01']['result03']['stdout'] }}"
+      register: result04
+
+    - debug: var=result04.stdout_lines
+
+
+- name: Play 7 - Copy and execute calico script
+  hosts: kserver01r01
+  become: true
+  gather_facts: false
+  vars:
+    ansible_user: root 
+  tasks:
+    
+    - name: Copy calico script
+      ansible.builtin.copy:
+        src: ../scripts/install_calico.sh
+        dest: /home/kubeuser/install_calico.sh
+        mode: '0777'
+
+    - name: Execute calico script
+      shell: /home/kubeuser/install_calico.sh
+      become: true
+      become_user: kubeuser
+      register: result05
+
+    - debug: var=result05.stdout_lines
+
+
+- name: Play 8 - Copy and execute apt helm script
+  hosts: kserver01r01
+  become: true
+  gather_facts: false
+  vars:
+    ansible_user: root
+  tasks:
+    
+    - name: Copy apt helm script
+      ansible.builtin.copy:
+        src: ../scripts/install_apt_helm.sh
+        dest: /home/kubeuser/install_apt_helm.sh
+        mode: '0777'
+
+    - name: Execute apt helm script
+      shell: /home/kubeuser/install_apt_helm.sh
+      register: result06
+
+    - debug: var=result06.stdout_lines
+
+
+- name: Play 9 - Copy and execute helm jenkins script
+  hosts: kserver01r01
+  become: true
+  gather_facts: false
+  vars:
+    ansible_user: root
+  tasks:
+    
+    - name: Copy helm jenkins script
+      ansible.builtin.copy:
+        src: ../scripts/install_helm_jenkins.sh
+        dest: /home/kubeuser/install_helm_jenkins.sh
+        mode: '0777'
+
+    - name: Execute helm jenkins script
+      shell: /home/kubeuser/install_helm_jenkins.sh
+      become: true
+      become_user: kubeuser
+      register: result07
+
+    - debug: var=result07.stdout_lines
+
+
+- name: Play 10 - Copy and execute demo nginx build job script
+  hosts: kserver01r01
+  become: true
+  gather_facts: false
+  vars:
+    ansible_user: root
+  tasks:
+    
+    - name: Copy demo nginx build job script
+      ansible.builtin.copy:
+        src: ../scripts/job_build_api.sh
+        dest: /home/kubeuser/job_build_api.sh
+        mode: '0777'
+
+    - name: Copy demo nginx pipeline xml file
+      ansible.builtin.copy:
+        src: ../scripts/nginx.xml
+        dest: /home/kubeuser/nginx.xml
+        mode: '0777'
+
+    - name: Execute helm jenkins script
+      shell: /home/kubeuser/job_build_api.sh
+      become: true
+      become_user: kubeuser
+      register: result08
+
+    - debug: var=result08.stdout_lines
+
+
+- name: Play 11 - Copy and execute final script
+  hosts: kserver01r01
+  become: true
+  gather_facts: false
+  vars:
+    ansible_user: root
+  tasks:
+    
+    - name: Copy final script
+      ansible.builtin.copy:
+        src: ../scripts/final.sh
+        dest: /home/kubeuser/final.sh
+        mode: '0777'
+
+    - name: Execute final script and provide env details 
+      shell: /home/kubeuser/final.sh
+      become: true
+      become_user: kubeuser
+      register: result09
+
+    - debug: var=result09.stdout_lines

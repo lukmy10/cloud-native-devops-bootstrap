@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<flow-definition plugin="workflow-job">
+  <actions/>
+  <description>Load Nginx Pipeline</description>
+  <keepDependencies>false</keepDependencies>
+  <properties/>
+  <definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition" plugin="workflow-cps">
+    <script>
+pipeline {
+    agent {
+        kubernetes {
+            yaml '''
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    some-label: jenkins-nginx-agent
+spec:
+  containers:
+  - name: helm-kubectl
+    image: dtzar/helm-kubectl:3.12.0
+    command:
+    - cat
+    tty: true
+'''
+        }
+    }
+    stages {
+        stage('Add Helm repository') {
+            steps {
+                container('helm-kubectl') {
+                    sh 'helm repo add bitnami https://charts.bitnami.com/bitnami'
+                    sh 'helm repo update'
+                }
+            }
+        }
+        stage('Install Nginx') {
+            steps {
+                container('helm-kubectl') {
+                    sh '''
+                    helm upgrade --install demo-nginx bitnami/nginx \
+                      --set service.type=NodePort \
+                      --namespace jenkins
+                    '''
+                }
+            }
+        }
+        stage('Veryfiy installation') {
+            steps {
+                container('helm-kubectl') {
+                    sh 'kubectl get pods,svc -l app.kubernetes.io/name=nginx -n jenkins'
+                }
+            }
+        }
+    }
+}
+    </script>
+    <sandbox>true</sandbox>
+  </definition>
+  <triggers/>
+  <disabled>false</disabled>
+</flow-definition>
